@@ -76,11 +76,12 @@ pipeline {
 
         stage('Manual Approval') {
             steps {
-                timeout(time: 15, unit: 'MINUTES') {
+                timeout(time: 30, unit: 'MINUTES') {
                     input(
-                        message: 'Terraform plan is ready. Do you want to apply the infrastructure?',
-                        ok: 'Apply Infrastructure',
-                        cancel: 'Cancel'
+                        id: 'TerraformApproval',
+                        message: 'Terraform plan is ready. Review the plan and approve the infrastructure deployment.',
+                        ok: 'Proceed with Terraform Apply'
+                        
                     )
                 }
             }
