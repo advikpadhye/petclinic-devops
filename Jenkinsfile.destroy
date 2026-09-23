@@ -1,0 +1,136 @@
+pipeline {
+
+    agent any
+
+    environment {
+        TF_IN_AUTOMATION = 'true'
+        AWS_DEFAULT_REGION = 'ap-south-1'
+    }
+
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+        skipDefaultCheckout(true)
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                echo 'Checking out Terraform infrastructure code from GitHub'
+
+                checkout scm
+            }
+        }
+
+        stage('Terraform Format Check') {
+            steps {
+                dir('terraform') {
+                    sh '''
+                        terraform fmt -check -recursive
+                    '''
+                }
+            }
+        }
+
+        stage('Terraform Init') {
+            steps {
+                dir('terraform') {
+                    sh '''
+                        terraform init -input=false
+                    '''
+                }
+            }
+        }
+
+        stage('Terraform Validate') {
+            steps {
+                dir('terraform') {
+                    sh '''
+                        terraform validate
+                    '''
+                }
+            }
+        }
+
+        stage('AWS Identity Check') {
+            steps {
+                sh '''
+                    echo "Checking AWS identity..."
+                    aws sts get-caller-identity
+                '''
+            }
+        }
+
+        stage('Terraform Destroy Plan') {
+            steps {
+                dir('terraform') {
+                    sh '''
+                        rm -f destroy.tfplan
+
+                        terraform plan \
+                          -destroy \
+                          -input=false \
+                          -out=destroy.tfplan
+                    '''
+                }
+            }
+        }
+
+        stage('Show Destroy Plan') {
+            steps {
+                dir('terraform') {
+                    sh '''
+                        terraform show \
+                          -no-color \
+                          destroy.tfplan > destroy-plan.txt
+
+                        cat destroy-plan.txt
+                    '''
+
+                    archiveArtifacts artifacts: 'destroy-plan.txt',
+                                     fingerprint: true
+                }
+            }
+        }
+
+        stage('Manual Destroy Approval') {
+            steps {
+                timeout(time: 30, unit: 'MINUTES') {
+                    input(
+                        id: 'TerraformDestroyApproval',
+                        message: 'WARNING: The Terraform destroy plan will delete the PetClinic AWS infrastructure. Review the destroy-plan.txt artifact before approving.',
+                        ok: 'Approve Infrastructure Destruction'
+                    )
+                }
+            }
+        }
+
+        stage('Terraform Destroy') {
+            steps {
+                dir('terraform') {
+                    sh '''
+                        terraform apply \
+                          -input=false \
+                          destroy.tfplan
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+
+        success {
+            echo 'Terraform infrastructure destruction completed successfully.'
+        }
+
+        failure {
+            echo 'Terraform destroy pipeline failed.'
+        }
+
+        aborted {
+            echo 'Terraform destroy pipeline was aborted.'
+        }
+    }
+}
